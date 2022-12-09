@@ -1,10 +1,11 @@
-name: release
+name: release generic
 on:
   push:
     branches:
       - main
     paths:
       - 'generic/**'
+      - '.github/workflows/release-generic.yaml'
 
 jobs:
   release:

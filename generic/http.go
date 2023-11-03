@@ -35,6 +35,8 @@ func JSONResponse(t *testing.T, code int, body any) *http.Response {
 	return &http.Response{
 		StatusCode: code,
 		Body:       io.NopCloser(&buf),
-		Header:     make(http.Header),
+		Header: map[string][]string{
+			"Content-Type": {"application/json"},
+		},
 	}
 }

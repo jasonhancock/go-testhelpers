@@ -30,10 +30,11 @@ func Setup(t *testing.T) *redis.Pool {
 	conn := pool.Get()
 	defer conn.Close()
 
-	_, err := conn.Do("FLUSHDB")
-	if err != nil {
+	t.Cleanup(func() {
 		require.NoError(t, pool.Close())
-	}
+	})
+
+	_, err := conn.Do("FLUSHDB")
 	require.NoError(t, err)
 	return pool
 }

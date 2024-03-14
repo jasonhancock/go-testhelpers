@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"io/fs"
 	"os"
+	"os/user"
 	"sort"
+	"strconv"
+	"syscall"
 	"testing"
 
 	"github.com/pmezard/go-difflib/difflib"
@@ -54,4 +57,54 @@ func FilesEqual(t *testing.T, expected, actual string) {
 	})
 	require.NoError(t, err)
 	t.Fatal("\n" + diff)
+}
+
+func RequirePerms(t *testing.T, path string, perms fs.FileMode) {
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	require.Equal(t, perms, info.Mode().Perm())
+}
+
+func RequireOwner(t *testing.T, path string, username string) {
+	t.Helper()
+
+	u, err := user.Lookup(username)
+	require.NoError(t, err)
+
+	uid, err := strconv.Atoi(u.Uid)
+	require.NoError(t, err)
+
+	RequireUID(t, path, uid)
+}
+
+func RequireGroup(t *testing.T, path string, groupName string) {
+	t.Helper()
+
+	g, err := user.LookupGroup(groupName)
+	require.NoError(t, err)
+
+	gid, err := strconv.Atoi(g.Gid)
+	require.NoError(t, err)
+
+	RequireGID(t, path, gid)
+}
+
+func RequireUID(t *testing.T, path string, owner int) {
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	require.True(t, ok)
+
+	require.Equal(t, owner, int(stat.Uid))
+}
+
+func RequireGID(t *testing.T, path string, group int) {
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	require.True(t, ok)
+
+	require.Equal(t, group, int(stat.Gid))
 }

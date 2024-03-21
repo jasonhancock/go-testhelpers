@@ -2,6 +2,7 @@ package generic
 
 import (
 	"bytes"
+	"io"
 	"io/fs"
 	"os"
 	"os/user"
@@ -107,4 +108,23 @@ func RequireGID(t *testing.T, path string, group int) {
 	require.True(t, ok)
 
 	require.Equal(t, group, int(stat.Gid))
+}
+
+// CopyFile copies src to dest atomically by creating an intermediate temporary
+// file and then doing an atomic rename.
+func CopyFile(t *testing.T, src, dest string) {
+	t.Helper()
+	fSrc, err := os.Open(src)
+	require.NoError(t, err)
+	defer fSrc.Close()
+
+	temp := dest + ".temp"
+	fDest, err := os.Create(temp)
+	require.NoError(t, err)
+
+	_, err = io.Copy(fDest, fSrc)
+	require.NoError(t, err)
+	require.NoError(t, fDest.Close())
+
+	require.NoError(t, os.Rename(temp, dest))
 }

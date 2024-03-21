@@ -17,6 +17,7 @@ import (
 
 // Walk traverses a directory tree and returns the list of files discovered.
 func Walk(t *testing.T, root string) []string {
+	t.Helper()
 	fileSystem := os.DirFS(root)
 
 	var files []string
@@ -39,6 +40,7 @@ func Walk(t *testing.T, root string) []string {
 // FilesEqual compares the contents of two files to see if they're equal. If not,
 // a unified diff is displayed showing the differences.
 func FilesEqual(t *testing.T, expected, actual string) {
+	t.Helper()
 	expectedBytes, err := os.ReadFile(expected)
 	require.NoError(t, err)
 
@@ -61,6 +63,7 @@ func FilesEqual(t *testing.T, expected, actual string) {
 }
 
 func RequirePerms(t *testing.T, path string, perms fs.FileMode) {
+	t.Helper()
 	info, err := os.Stat(path)
 	require.NoError(t, err)
 	require.Equal(t, perms, info.Mode().Perm())
@@ -91,6 +94,7 @@ func RequireGroup(t *testing.T, path string, groupName string) {
 }
 
 func RequireUID(t *testing.T, path string, owner int) {
+	t.Helper()
 	info, err := os.Stat(path)
 	require.NoError(t, err)
 
@@ -101,6 +105,7 @@ func RequireUID(t *testing.T, path string, owner int) {
 }
 
 func RequireGID(t *testing.T, path string, group int) {
+	t.Helper()
 	info, err := os.Stat(path)
 	require.NoError(t, err)
 

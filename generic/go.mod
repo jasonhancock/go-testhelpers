@@ -3,8 +3,9 @@ module github.com/jasonhancock/go-testhelpers/generic
 go 1.19
 
 require (
+	github.com/google/uuid v1.6.0
 	github.com/pmezard/go-difflib v1.0.0
-	github.com/stretchr/testify v1.8.4
+	github.com/stretchr/testify v1.9.0
 )
 
 require (

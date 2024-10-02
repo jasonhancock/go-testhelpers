@@ -13,6 +13,7 @@ import (
 	"io"
 	"math/big"
 	"net"
+	"os"
 	"time"
 )
 
@@ -107,6 +108,65 @@ type CertificateAuthority struct {
 
 	PEMCert []byte
 	PEMKey  []byte
+}
+
+// LoadCertificateAuthority loads a CA from two io.Readers.
+func LoadCertificateAuthority(cert, key io.Reader) (*CertificateAuthority, error) {
+	var ca CertificateAuthority
+
+	var err error
+	ca.PEMCert, err = io.ReadAll(cert)
+	if err != nil {
+		return nil, fmt.Errorf("loading certificate: %w", err)
+	}
+
+	ca.PEMKey, err = io.ReadAll(key)
+	if err != nil {
+		return nil, fmt.Errorf("loading key: %w", err)
+	}
+
+	{ // load the certificate
+		block, _ := pem.Decode(ca.PEMCert)
+		if block == nil {
+			return nil, errors.New("unable to decode cert pem block")
+		}
+
+		ca.Cert, err = x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("parsing x509 cert: %w", err)
+		}
+	}
+
+	{ // load the private key
+		block, _ := pem.Decode(ca.PEMKey)
+		if block == nil {
+			return nil, errors.New("unable to decode key pem block")
+		}
+
+		ca.PrivKey, err = x509.ParsePKCS1PrivateKey(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("parsing x509 private key: %w", err)
+		}
+	}
+
+	return &ca, nil
+}
+
+// LoadCertificateAuthorityFiles loads a CA from a cert and key on disk.
+func LoadCertificateAuthorityFiles(cert, key string) (*CertificateAuthority, error) {
+	certFile, err := os.Open(cert)
+	if err != nil {
+		return nil, fmt.Errorf("opening ca cert: %w", err)
+	}
+	defer certFile.Close()
+
+	keyFile, err := os.Open(key)
+	if err != nil {
+		return nil, fmt.Errorf("opening ca key: %w", err)
+	}
+	defer keyFile.Close()
+
+	return LoadCertificateAuthority(certFile, keyFile)
 }
 
 // NewCertificateAuthority initializes a CertificateAuthority.

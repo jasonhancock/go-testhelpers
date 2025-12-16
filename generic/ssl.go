@@ -43,14 +43,14 @@ func pemBlockForKey(priv interface{}) (*pem.Block, error) {
 	}
 }
 
-func generateTemplate(hosts []string) *x509.Certificate {
+func generateTemplate(hosts []string, opts certificateOptions) *x509.Certificate {
 	template := x509.Certificate{
 		SerialNumber: big.NewInt(time.Now().UnixNano()),
 		Subject: pkix.Name{
 			Organization: []string{"Acme Co"},
 		},
-		NotBefore: time.Now(),
-		NotAfter:  time.Now().Add(time.Hour * 24 * 180),
+		NotBefore: opts.notBefore,
+		NotAfter:  opts.notAfter,
 
 		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
@@ -69,12 +69,14 @@ func generateTemplate(hosts []string) *x509.Certificate {
 }
 
 // GenerateSelfSignedCert generates a self-signed RSA certificate for testing purposes.
-func GenerateSelfSignedCert(destCert, destKey io.Writer, hosts []string) error {
-	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+func GenerateSelfSignedCert(destCert, destKey io.Writer, hosts []string, opts ...CertificateOption) error {
+	opt := newCertOptions(2048, opts...)
+
+	priv, err := rsa.GenerateKey(rand.Reader, opt.keySize)
 	if err != nil {
 		return fmt.Errorf("generating key: %w", err)
 	}
-	template := generateTemplate(hosts)
+	template := generateTemplate(hosts, opt)
 	pubKey, err := publicKey(priv)
 	if err != nil {
 		return fmt.Errorf("getting public key: %w", err)
@@ -170,15 +172,17 @@ func LoadCertificateAuthorityFiles(cert, key string) (*CertificateAuthority, err
 }
 
 // NewCertificateAuthority initializes a CertificateAuthority.
-func NewCertificateAuthority() (*CertificateAuthority, error) {
+func NewCertificateAuthority(opts ...CertificateOption) (*CertificateAuthority, error) {
+	opt := newCertOptions(4096, opts...)
+
 	var ca CertificateAuthority
 	ca.Cert = &x509.Certificate{
 		SerialNumber: big.NewInt(time.Now().UnixNano()),
 		Subject: pkix.Name{
 			Organization: []string{"Acme Co"},
 		},
-		NotBefore:             time.Now(),
-		NotAfter:              time.Now().Add(time.Hour * 24 * 180),
+		NotBefore:             opt.notBefore,
+		NotAfter:              opt.notAfter,
 		IsCA:                  true,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
 		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
@@ -187,7 +191,7 @@ func NewCertificateAuthority() (*CertificateAuthority, error) {
 
 	// create our private and public key
 	var err error
-	ca.PrivKey, err = rsa.GenerateKey(rand.Reader, 4096)
+	ca.PrivKey, err = rsa.GenerateKey(rand.Reader, opt.keySize)
 	if err != nil {
 		return nil, err
 	}
@@ -241,6 +245,51 @@ func (c *CertificateAuthority) SignCert(template *x509.Certificate, destCert, de
 
 // MakeCert is a helper method that will generate a cert using the hosts and/or
 // ips in the hosts array.
-func (c *CertificateAuthority) MakeCert(destCert, destKey io.Writer, hosts ...string) error {
-	return c.SignCert(generateTemplate(hosts), destCert, destKey)
+func (c *CertificateAuthority) MakeCert(destCert, destKey io.Writer, hosts []string, opts ...CertificateOption) error {
+	opt := newCertOptions(2048, opts...)
+	return c.SignCert(generateTemplate(hosts, opt), destCert, destKey)
+}
+
+type certificateOptions struct {
+	keySize   int
+	notBefore time.Time
+	notAfter  time.Time
+}
+
+func newCertOptions(keySize int, opts ...CertificateOption) certificateOptions {
+	now := time.Now()
+	opt := certificateOptions{
+		keySize:   keySize,
+		notBefore: now,
+		notAfter:  now.Add(time.Hour * 24 * 180),
+	}
+	for _, o := range opts {
+		o(&opt)
+	}
+
+	return opt
+}
+
+// CertificateOption is used to customize certs.
+type CertificateOption func(*certificateOptions)
+
+// WithKeySize sets the key size in bits.
+func WithKeySize(size int) CertificateOption {
+	return func(o *certificateOptions) {
+		o.keySize = size
+	}
+}
+
+// WithNotBefore sets when the certificate becomes valid.
+func WithNotBefore(ts time.Time) CertificateOption {
+	return func(o *certificateOptions) {
+		o.notBefore = ts
+	}
+}
+
+// WithNotAfter sets the certificate expiration.
+func WithNotAfter(ts time.Time) CertificateOption {
+	return func(o *certificateOptions) {
+		o.notAfter = ts
+	}
 }

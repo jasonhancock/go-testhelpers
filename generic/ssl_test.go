@@ -35,7 +35,7 @@ func TestCA(t *testing.T) {
 	require.NoError(t, err)
 
 	var cert, key bytes.Buffer
-	require.NoError(t, ca.MakeCert(&cert, &key, "127.0.0.1"))
+	require.NoError(t, ca.MakeCert(&cert, &key, []string{"127.0.0.1"}))
 
 	serverCert, err := tls.X509KeyPair(cert.Bytes(), key.Bytes())
 	require.NoError(t, err)

@@ -46,11 +46,9 @@ func pemBlockForKey(priv interface{}) (*pem.Block, error) {
 func generateTemplate(hosts []string, opts certificateOptions) *x509.Certificate {
 	template := x509.Certificate{
 		SerialNumber: big.NewInt(time.Now().UnixNano()),
-		Subject: pkix.Name{
-			Organization: []string{"Acme Co"},
-		},
-		NotBefore: opts.notBefore,
-		NotAfter:  opts.notAfter,
+		Subject:      opts.subject,
+		NotBefore:    opts.notBefore,
+		NotAfter:     opts.notAfter,
 
 		KeyUsage:              x509.KeyUsageKeyEncipherment | x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
@@ -177,10 +175,8 @@ func NewCertificateAuthority(opts ...CertificateOption) (*CertificateAuthority, 
 
 	var ca CertificateAuthority
 	ca.Cert = &x509.Certificate{
-		SerialNumber: big.NewInt(time.Now().UnixNano()),
-		Subject: pkix.Name{
-			Organization: []string{"Acme Co"},
-		},
+		SerialNumber:          big.NewInt(time.Now().UnixNano()),
+		Subject:               opt.subject,
 		NotBefore:             opt.notBefore,
 		NotAfter:              opt.notAfter,
 		IsCA:                  true,
@@ -254,6 +250,7 @@ type certificateOptions struct {
 	keySize   int
 	notBefore time.Time
 	notAfter  time.Time
+	subject   pkix.Name
 }
 
 func newCertOptions(keySize int, opts ...CertificateOption) certificateOptions {
@@ -262,6 +259,9 @@ func newCertOptions(keySize int, opts ...CertificateOption) certificateOptions {
 		keySize:   keySize,
 		notBefore: now,
 		notAfter:  now.Add(time.Hour * 24 * 180),
+		subject: pkix.Name{
+			Organization: []string{"Acme Co"},
+		},
 	}
 	for _, o := range opts {
 		o(&opt)
@@ -291,5 +291,12 @@ func WithNotBefore(ts time.Time) CertificateOption {
 func WithNotAfter(ts time.Time) CertificateOption {
 	return func(o *certificateOptions) {
 		o.notAfter = ts
+	}
+}
+
+// WithSubject sets the subject to use.
+func WithSubject(sub pkix.Name) CertificateOption {
+	return func(o *certificateOptions) {
+		o.subject = sub
 	}
 }

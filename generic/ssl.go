@@ -2,7 +2,9 @@ package generic
 
 import (
 	"bytes"
+	"crypto"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -23,6 +25,8 @@ func publicKey(priv interface{}) (any, error) {
 		return &k.PublicKey, nil
 	case *ecdsa.PrivateKey:
 		return &k.PublicKey, nil
+	case ed25519.PrivateKey:
+		return k.Public(), nil
 	default:
 		return nil, errors.New("unknown private key type")
 	}
@@ -38,8 +42,14 @@ func pemBlockForKey(priv interface{}) (*pem.Block, error) {
 			return nil, fmt.Errorf("unable to marshal ECDSA private key: %v", err)
 		}
 		return &pem.Block{Type: "EC PRIVATE KEY", Bytes: b}, nil
+	case ed25519.PrivateKey:
+		b, err := x509.MarshalPKCS8PrivateKey(k)
+		if err != nil {
+			return nil, fmt.Errorf("unable to marshal Ed25519 private key: %v", err)
+		}
+		return &pem.Block{Type: "PRIVATE KEY", Bytes: b}, nil
 	default:
-		return nil, errors.New("unknwn private key type")
+		return nil, errors.New("unknown private key type")
 	}
 }
 
@@ -70,7 +80,7 @@ func generateTemplate(hosts []string, opts certificateOptions) *x509.Certificate
 func GenerateSelfSignedCert(destCert, destKey io.Writer, hosts []string, opts ...CertificateOption) error {
 	opt := newCertOptions(2048, opts...)
 
-	priv, err := rsa.GenerateKey(rand.Reader, opt.keySize)
+	priv, err := opt.privateKey()
 	if err != nil {
 		return fmt.Errorf("generating key: %w", err)
 	}
@@ -172,6 +182,9 @@ func LoadCertificateAuthorityFiles(cert, key string) (*CertificateAuthority, err
 // NewCertificateAuthority initializes a CertificateAuthority.
 func NewCertificateAuthority(opts ...CertificateOption) (*CertificateAuthority, error) {
 	opt := newCertOptions(4096, opts...)
+	if opt.key != nil {
+		return nil, errors.New("WithKey is not supported for certificate authorities")
+	}
 
 	var ca CertificateAuthority
 	ca.Cert = &x509.Certificate{
@@ -198,6 +211,15 @@ func NewCertificateAuthority(opts ...CertificateOption) (*CertificateAuthority, 
 		return nil, err
 	}
 
+	// Replace the template with the parsed certificate so Cert carries the
+	// fields only populated on a real certificate (Raw, PublicKey,
+	// SubjectKeyId). Without them, CheckSignatureFrom(ca.Cert) fails and
+	// issued certs are missing their AuthorityKeyId.
+	ca.Cert, err = x509.ParseCertificate(caBytes)
+	if err != nil {
+		return nil, fmt.Errorf("parsing CA certificate: %w", err)
+	}
+
 	// pem encode
 	var caPEM bytes.Buffer
 	if err := pem.Encode(&caPEM, &pem.Block{Type: "CERTIFICATE", Bytes: caBytes}); err != nil {
@@ -216,14 +238,25 @@ func NewCertificateAuthority(opts ...CertificateOption) (*CertificateAuthority, 
 }
 
 // SignCert will sign a certificate with the CA. This method gives you more
-// control of the cert than the MakeCert method does.
-func (c *CertificateAuthority) SignCert(template *x509.Certificate, destCert, destKey io.Writer) error {
-	certPrivKey, err := rsa.GenerateKey(rand.Reader, 4096)
+// control of the cert than the MakeCert method does. Only the key options
+// (WithKey, WithKeySize) apply; everything else comes from the template. By
+// default a new 4096 bit RSA key is generated.
+func (c *CertificateAuthority) SignCert(template *x509.Certificate, destCert, destKey io.Writer, opts ...CertificateOption) error {
+	return c.signCert(template, destCert, destKey, newCertOptions(4096, opts...))
+}
+
+func (c *CertificateAuthority) signCert(template *x509.Certificate, destCert, destKey io.Writer, opt certificateOptions) error {
+	certPrivKey, err := opt.privateKey()
 	if err != nil {
-		return err
+		return fmt.Errorf("generating key: %w", err)
 	}
 
-	certBytes, err := x509.CreateCertificate(rand.Reader, template, c.Cert, &certPrivKey.PublicKey, c.PrivKey)
+	pubKey, err := publicKey(certPrivKey)
+	if err != nil {
+		return fmt.Errorf("getting public key: %w", err)
+	}
+
+	certBytes, err := x509.CreateCertificate(rand.Reader, template, c.Cert, pubKey, c.PrivKey)
 	if err != nil {
 		return err
 	}
@@ -232,21 +265,23 @@ func (c *CertificateAuthority) SignCert(template *x509.Certificate, destCert, de
 		return err
 	}
 
-	err = pem.Encode(destKey, &pem.Block{
-		Type:  "RSA PRIVATE KEY",
-		Bytes: x509.MarshalPKCS1PrivateKey(certPrivKey),
-	})
-	return err
+	privPem, err := pemBlockForKey(certPrivKey)
+	if err != nil {
+		return fmt.Errorf("getting private key pem: %w", err)
+	}
+
+	return pem.Encode(destKey, privPem)
 }
 
 // MakeCert is a helper method that will generate a cert using the hosts and/or
-// ips in the hosts array.
+// ips in the hosts array. By default a new 2048 bit RSA key is generated.
 func (c *CertificateAuthority) MakeCert(destCert, destKey io.Writer, hosts []string, opts ...CertificateOption) error {
 	opt := newCertOptions(2048, opts...)
-	return c.SignCert(generateTemplate(hosts, opt), destCert, destKey)
+	return c.signCert(generateTemplate(hosts, opt), destCert, destKey, opt)
 }
 
 type certificateOptions struct {
+	key       crypto.Signer
 	keySize   int
 	notBefore time.Time
 	notAfter  time.Time
@@ -270,10 +305,30 @@ func newCertOptions(keySize int, opts ...CertificateOption) certificateOptions {
 	return opt
 }
 
+// privateKey returns the key set with WithKey, or generates a new RSA key of
+// the configured size.
+func (o certificateOptions) privateKey() (crypto.Signer, error) {
+	if o.key != nil {
+		return o.key, nil
+	}
+	return rsa.GenerateKey(rand.Reader, o.keySize)
+}
+
 // CertificateOption is used to customize certs.
 type CertificateOption func(*certificateOptions)
 
-// WithKeySize sets the key size in bits.
+// WithKey sets the private key to issue the certificate for, instead of
+// generating a new RSA key. Supports *rsa.PrivateKey, *ecdsa.PrivateKey, and
+// ed25519.PrivateKey. Not supported by NewCertificateAuthority, whose key is
+// always RSA.
+func WithKey(key crypto.Signer) CertificateOption {
+	return func(o *certificateOptions) {
+		o.key = key
+	}
+}
+
+// WithKeySize sets the size in bits of generated RSA keys. Ignored when
+// WithKey is used.
 func WithKeySize(size int) CertificateOption {
 	return func(o *certificateOptions) {
 		o.keySize = size
